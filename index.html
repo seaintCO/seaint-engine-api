@@ -78,7 +78,6 @@
     @keyframes fadeIn{ from{opacity:0; transform:translateY(10px)} to{opacity:1; transform:translateY(0)} }
     .table-row-hover:hover{ background: rgba(255,255,255,0.02); }
 
-    /* Scrollbar */
     ::-webkit-scrollbar{ width:6px; height:6px; }
     ::-webkit-scrollbar-track{ background:transparent; }
     ::-webkit-scrollbar-thumb{ background: rgba(255,255,255,0.1); border-radius:10px; }
@@ -343,10 +342,17 @@
     if (runId) {
       runIdLine.style.display = "block";
       runIdLine.innerText = "RUN_ID: " + runId;
+    } else {
+      runIdLine.style.display = "none";
+      runIdLine.innerText = "";
     }
+
     if (datasetId) {
       datasetIdLine.style.display = "block";
       datasetIdLine.innerText = "DATASET_ID: " + datasetId;
+    } else {
+      datasetIdLine.style.display = "none";
+      datasetIdLine.innerText = "";
     }
   }
 
@@ -376,11 +382,17 @@
       const name = x.title || x.name || x.placeName || "—";
       const phone = x.phone || x.phoneNumber || "—";
       const website = x.website || x.url || x.websiteUrl || "";
-      const address = x.address || x.fullAddress || (x.location && x.location.address) || "—";
-      const rating = x.totalScore || x.rating || "—";
+      const address =
+        x.address ||
+        x.fullAddress ||
+        (x.location && (x.location.address || x.location.formattedAddress)) ||
+        x.formattedAddress ||
+        "—";
+      const rating = x.totalScore ?? x.rating ?? "—";
 
-      const webCell = website
-        ? `<a class="text-emerald-400 hover:underline" href="${website}" target="_blank" rel="noreferrer">${website.replace("https://","").replace("http://","")}</a>`
+      const safeWebsite = website ? normalizeUrl(website) : "";
+      const webCell = safeWebsite
+        ? `<a class="text-emerald-400 hover:underline" href="${escapeAttr(safeWebsite)}" target="_blank" rel="noreferrer">${escapeHtml(stripProtocol(safeWebsite))}</a>`
         : `<span class="text-neutral-500 italic text-xs">No website</span>`;
 
       return `
@@ -404,6 +416,18 @@
       .replaceAll('"',"&quot;")
       .replaceAll("'","&#039;");
   }
+  function escapeAttr(str) {
+    return String(str).replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+  }
+  function stripProtocol(url) {
+    return String(url).replace(/^https?:\/\//i, "");
+  }
+  function normalizeUrl(url) {
+    const u = String(url).trim();
+    if (!u) return "";
+    if (/^https?:\/\//i.test(u)) return u;
+    return "https://" + u;
+  }
 
   // ---------------- CSV Export ----------------
   exportBtn.addEventListener("click", () => {
@@ -411,7 +435,7 @@
 
     const cols = ["title","phone","website","address","totalScore","reviewsCount","categoryName","city","state"];
     const header = cols.join(",");
-    const lines = lastLeads.map((x) => cols.map((c) => csvCell(x[c] ?? "")).join(","));
+    const lines = lastLeads.map((x) => cols.map((c) => csvCell(x?.[c] ?? "")).join(","));
     const csv = [header, ...lines].join("\n");
 
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -431,10 +455,16 @@
     return s;
   }
 
-  // ---------------- Real Apify Flow (via Vercel /api) ----------------
+  // =====================================================
+  // REAL APIFY FLOW (Vercel Serverless API)
+  // Endpoints used:
+  //   POST /api/start
+  //   GET  /api/status?runId=...
+  //   GET  /api/results?datasetId=...&limit=...&offset=...
+  // =====================================================
+
   const form = document.getElementById("search-form");
   const startBtn = document.getElementById("startBtn");
-
   let pollTimer = null;
 
   form.addEventListener("submit", async (e) => {
@@ -446,10 +476,17 @@
 
     if (!searchQuery || !location) return;
 
+    // stop any old poll
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+
     startBtn.disabled = true;
     setStatus("RUNNING", "Starting Apify run...");
 
     try {
+      // 1) START
       const r = await fetch("/api/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -460,33 +497,41 @@
       if (!r.ok) throw new Error(data?.error || "Failed to start run");
 
       const runId = data.runId;
-      if (!runId) throw new Error("No runId returned");
+      if (!runId) throw new Error("No runId returned from /api/start");
 
       setStatus("RUNNING", "Run started. Polling status...", runId);
 
-      if (pollTimer) clearInterval(pollTimer);
+      // 2) POLL
       pollTimer = setInterval(async () => {
         try {
           const s = await fetch(`/api/status?runId=${encodeURIComponent(runId)}`, { cache: "no-store" });
           const sd = await s.json();
           if (!s.ok) throw new Error(sd?.error || "Status error");
 
-          const status = sd.status || "RUNNING";
-          const datasetId = sd.defaultDatasetId || null;
+          const status = (sd.status || "RUNNING").toUpperCase();
+          const datasetId = sd.defaultDatasetId || "";
 
-          if (status === "RUNNING") {
-            setStatus("RUNNING", "Running... extracting & cleaning dataset", runId);
+          // live status updates
+          if (status === "RUNNING" || status === "READY") {
+            setStatus("RUNNING", "Running... extracting & cleaning dataset", runId, datasetId || "");
+            return;
           }
 
+          // 3) SUCCEEDED -> LOAD RESULTS
           if (status === "SUCCEEDED") {
             clearInterval(pollTimer);
             pollTimer = null;
 
             setStatus("SUCCEEDED", "Succeeded. Fetching leads...", runId, datasetId || "");
 
-            if (!datasetId) throw new Error("Succeeded but datasetId missing");
+            if (!datasetId) throw new Error("Run SUCCEEDED but datasetId missing.");
 
-            const res = await fetch(`/api/results?datasetId=${encodeURIComponent(datasetId)}&limit=${encodeURIComponent(String(maxResults))}`, { cache: "no-store" });
+            // Pull results (limit defaults in your API. We pass limit anyway.)
+            const res = await fetch(
+              `/api/results?datasetId=${encodeURIComponent(datasetId)}&limit=${encodeURIComponent(String(maxResults))}&offset=0`,
+              { cache: "no-store" }
+            );
+
             const rd = await res.json();
             if (!res.ok) throw new Error(rd?.error || "Results error");
 
@@ -497,21 +542,29 @@
             setStatus("SUCCEEDED", `Dataset ready. ${items.length} leads loaded.`, runId, datasetId);
 
             startBtn.disabled = false;
+            return;
           }
 
-          if (status === "FAILED") {
+          // 4) FAILED STATES
+          if (status === "FAILED" || status === "ABORTED" || status === "TIMED-OUT") {
             clearInterval(pollTimer);
             pollTimer = null;
-            setStatus("FAILED", "Failed. Check Apify run logs.", runId);
+            setStatus(status, "Run failed. Check Apify logs.", runId, datasetId || "");
             startBtn.disabled = false;
+            return;
           }
+
+          // anything else
+          setStatus("RUNNING", `Status: ${status}`, runId, datasetId || "");
+
         } catch (err) {
-          setStatus("RUNNING", err?.message || "Polling error");
+          // keep polling, just show error text
+          setStatus("RUNNING", (err && err.message) ? err.message : "Polling error", runId);
         }
       }, 4000);
 
     } catch (err) {
-      setStatus("FAILED", err?.message || "Failed to start run");
+      setStatus("FAILED", (err && err.message) ? err.message : "Failed to start run");
       startBtn.disabled = false;
     }
   });
