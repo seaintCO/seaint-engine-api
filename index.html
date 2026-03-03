@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SEAINT Lead Engine</title>
+
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Three.js & GSAP -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+
+  <!-- Iconify -->
+  <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          fontFamily: { sans: ["Inter", "sans-serif"] },
+          colors: {
+            bgDark: "#020202",
+            surfaceDark: "#0a0a0a",
+            borderDark: "rgba(255, 255, 255, 0.06)",
+            textDark: "#EAEAEA",
+            accent: "#10B981",
+            accentGlow: "#34D399",
+          },
+        },
+      },
+    };
+  </script>
+
+  <style>
+    body { background-color:#020202; color:#eaeaea; overflow:hidden; }
+    .glass-panel{
+      background: linear-gradient(180deg, rgba(20,20,20,0.65), rgba(8,8,8,0.75));
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 25px 80px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04);
+    }
+    #canvas-container{
+      position:fixed; top:0; left:0; width:100%; height:100vh; z-index:0;
+      opacity:0; transition:opacity 1.5s cubic-bezier(0.22,1,0.36,1);
+      pointer-events:none;
+    }
+    #loading-screen{
+      position:fixed; inset:0; z-index:100; display:flex; flex-direction:column;
+      align-items:center; justify-content:center; background:#020202; color:#eaeaea;
+      transition:opacity 1s cubic-bezier(0.22,1,0.36,1);
+    }
+    .app-input{
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      color:#fff; transition:all .2s ease;
+    }
+    .app-input:focus{
+      outline:none; border-color: rgba(16,185,129,0.5);
+      background: rgba(255,255,255,0.05);
+      box-shadow: 0 0 0 1px rgba(16,185,129,0.5);
+    }
+    .nav-item.active{
+      background: rgba(255,255,255,0.06);
+      color:#fff;
+      border-color: rgba(255,255,255,0.1);
+    }
+    .nav-item.active iconify-icon{ color:#10B981; }
+    .view-section{ display:none; animation: fadeIn .4s cubic-bezier(.2,1,.3,1) forwards; }
+    .view-section.active{ display:block; }
+    @keyframes fadeIn{ from{opacity:0; transform:translateY(10px)} to{opacity:1; transform:translateY(0)} }
+    .table-row-hover:hover{ background: rgba(255,255,255,0.02); }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar{ width:6px; height:6px; }
+    ::-webkit-scrollbar-track{ background:transparent; }
+    ::-webkit-scrollbar-thumb{ background: rgba(255,255,255,0.1); border-radius:10px; }
+    ::-webkit-scrollbar-thumb:hover{ background: rgba(255,255,255,0.2); }
+  </style>
+</head>
+
+<body class="antialiased flex h-screen w-full text-sm">
+
+  <!-- Loading Screen -->
+  <div id="loading-screen">
+    <div class="text-[10px] uppercase text-gray-500 font-medium tracking-[0.2em] mb-3">
+      Initializing SEAINT
+    </div>
+    <div class="w-40 h-[2px] bg-gray-800 rounded-full overflow-hidden">
+      <div class="h-full bg-accent transition-all duration-100 ease-out rounded-full" style="width:0%" id="loader-fill"></div>
+    </div>
+    <div class="mt-3 text-[10px] font-mono opacity-30" id="loader-text">0%</div>
+  </div>
+
+  <!-- 3D Background -->
+  <div id="canvas-container"></div>
+
+  <!-- App -->
+  <div class="relative z-10 flex h-full w-full opacity-0 transition-opacity duration-1000" id="app-container">
+
+    <!-- Sidebar -->
+    <aside class="w-64 h-full flex flex-col border-r border-white/[0.06] bg-[#020202]/80 backdrop-blur-xl">
+      <div class="h-16 flex items-center px-6 border-b border-white/[0.04]">
+        <div class="flex items-center gap-3">
+          <div class="w-6 h-6 bg-accent rounded-md flex items-center justify-center shadow-[0_0_15px_rgba(16,185,129,0.3)]">
+            <div class="w-2 h-2 bg-white rounded-full"></div>
+          </div>
+          <span class="font-semibold tracking-tight text-white text-base">
+            SEAINT <span class="text-neutral-500 font-normal">Engine</span>
+          </span>
+        </div>
+      </div>
+
+      <nav class="flex-1 px-3 py-6 space-y-1.5 overflow-y-auto">
+        <button class="nav-item active w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/[0.03] transition-colors border border-transparent font-medium text-sm" data-target="dashboard">
+          <iconify-icon icon="solar:widget-linear" class="text-lg"></iconify-icon>
+          Dashboard
+        </button>
+        <button class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/[0.03] transition-colors border border-transparent font-medium text-sm" data-target="new-search">
+          <iconify-icon icon="solar:magnifer-linear" class="text-lg"></iconify-icon>
+          New Search
+        </button>
+        <button class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/[0.03] transition-colors border border-transparent font-medium text-sm" data-target="leads">
+          <iconify-icon icon="solar:users-group-two-rounded-linear" class="text-lg"></iconify-icon>
+          Leads Directory
+        </button>
+      </nav>
+
+      <div class="p-4 border-t border-white/[0.04]">
+        <div class="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-white/[0.02] cursor-pointer transition-colors">
+          <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-accent to-emerald-700 flex items-center justify-center text-white font-medium text-xs shadow-inner">
+            SA
+          </div>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium text-white truncate">SEAINT Admin</p>
+            <p class="text-xs text-neutral-500 truncate">admin@seaint.io</p>
+          </div>
+          <iconify-icon icon="solar:alt-arrow-down-linear" class="text-neutral-500"></iconify-icon>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="flex-1 flex flex-col min-w-0 bg-transparent">
+      <header class="h-16 flex items-center justify-between px-8 border-b border-white/[0.04] bg-[#020202]/60 backdrop-blur-md">
+        <div class="flex items-center gap-4">
+          <h1 class="text-lg font-medium text-white tracking-tight" id="topbar-title">Dashboard</h1>
+          <div class="h-4 w-px bg-white/10"></div>
+          <div class="flex items-center gap-2">
+            <span class="relative flex h-2 w-2">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75"></span>
+              <span class="relative inline-flex rounded-full h-2 w-2 bg-accent"></span>
+            </span>
+            <span class="text-xs text-neutral-400 font-medium" id="system-pill">System Operational</span>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-4">
+          <button class="nav-btn-search h-9 px-4 bg-accent hover:bg-accentGlow text-white text-xs font-medium rounded-lg transition-all duration-300 flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(16,185,129,0.2)]">
+            <iconify-icon icon="solar:add-circle-linear" class="text-sm"></iconify-icon>
+            New Search
+          </button>
+        </div>
+      </header>
+
+      <div class="flex-1 overflow-y-auto p-8">
+        <div class="max-w-6xl mx-auto">
+
+          <!-- DASHBOARD -->
+          <div id="dashboard" class="view-section active">
+            <div class="glass-panel rounded-2xl overflow-hidden">
+              <div class="px-6 py-5 border-b border-white/5 flex justify-between items-center">
+                <h3 class="text-base font-medium text-white tracking-tight">Run Status</h3>
+              </div>
+              <div class="p-6 text-neutral-300">
+                <div class="text-xs text-neutral-500 mb-2">Current</div>
+                <div class="flex items-center gap-3">
+                  <span id="runStatusPill" class="px-2.5 py-1 rounded-full text-[11px] font-medium border border-white/10 bg-white/5">READY</span>
+                  <span id="statusDetail" class="text-sm text-neutral-400">System idle</span>
+                </div>
+                <div class="mt-3 text-xs font-mono text-neutral-500" id="runIdLine" style="display:none;"></div>
+                <div class="mt-1 text-xs font-mono text-neutral-500" id="datasetIdLine" style="display:none;"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- NEW SEARCH -->
+          <div id="new-search" class="view-section">
+            <div class="max-w-2xl mx-auto">
+              <div class="mb-8">
+                <h2 class="text-2xl font-semibold tracking-tight text-white mb-2">Initialize Search Protocol</h2>
+                <p class="text-neutral-400 text-sm">Runs your Apify actor from Vercel (token stays secret).</p>
+              </div>
+
+              <div class="glass-panel p-8 rounded-2xl relative overflow-hidden">
+                <div class="absolute inset-0 pointer-events-none opacity-[0.03]" style="background-image: linear-gradient(rgba(255,255,255,1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,1) 1px, transparent 1px); background-size: 20px 20px;"></div>
+
+                <form id="search-form" class="space-y-6 relative z-10">
+                  <div class="space-y-2">
+                    <label class="block text-xs font-medium text-neutral-300 uppercase tracking-wider">Search Query</label>
+                    <input id="sq" class="app-input w-full rounded-xl px-4 py-3 text-sm placeholder-neutral-600" placeholder="e.g., Concrete Contractors" required />
+                  </div>
+
+                  <div class="grid grid-cols-2 gap-6">
+                    <div class="space-y-2">
+                      <label class="block text-xs font-medium text-neutral-300 uppercase tracking-wider">Location</label>
+                      <input id="loc" class="app-input w-full rounded-xl px-4 py-3 text-sm placeholder-neutral-600" placeholder="e.g., Nashville, TN" required />
+                    </div>
+                    <div class="space-y-2">
+                      <label class="block text-xs font-medium text-neutral-300 uppercase tracking-wider">Max Results</label>
+                      <input id="maxr" type="number" min="1" max="1000" value="50" class="app-input w-full rounded-xl px-4 py-3 text-sm" required />
+                    </div>
+                  </div>
+
+                  <button id="startBtn" type="submit" class="w-full h-12 bg-white text-black hover:bg-neutral-200 font-medium rounded-xl transition-all duration-300 flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(255,255,255,0.15)]">
+                    <iconify-icon icon="solar:play-linear" class="text-lg"></iconify-icon>
+                    Start Actor Run
+                  </button>
+
+                  <div class="pt-2 text-xs text-neutral-500">
+                    Tip: this will poll Apify until it finishes, then load your leads automatically.
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+
+          <!-- LEADS -->
+          <div id="leads" class="view-section">
+            <div class="mb-6 flex justify-between items-end">
+              <div>
+                <h2 class="text-2xl font-semibold tracking-tight text-white mb-1">Leads Directory</h2>
+                <p class="text-neutral-400 text-sm" id="leadsSubtitle">No leads loaded yet.</p>
+              </div>
+
+              <button id="exportBtn" class="h-9 px-4 rounded-lg border border-white/10 bg-white/5 text-white font-medium text-xs hover:bg-white/10 transition-colors flex items-center gap-2" disabled>
+                <iconify-icon icon="solar:download-linear"></iconify-icon>
+                Export CSV
+              </button>
+            </div>
+
+            <div class="glass-panel rounded-2xl overflow-hidden">
+              <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse whitespace-nowrap">
+                  <thead>
+                    <tr>
+                      <th class="px-4 py-4 text-xs font-medium text-neutral-500 uppercase tracking-wider border-b border-white/5">Business Name</th>
+                      <th class="px-4 py-4 text-xs font-medium text-neutral-500 uppercase tracking-wider border-b border-white/5">Phone</th>
+                      <th class="px-4 py-4 text-xs font-medium text-neutral-500 uppercase tracking-wider border-b border-white/5">Website</th>
+                      <th class="px-4 py-4 text-xs font-medium text-neutral-500 uppercase tracking-wider border-b border-white/5">Address</th>
+                      <th class="px-4 py-4 text-xs font-medium text-neutral-500 uppercase tracking-wider border-b border-white/5">Rating</th>
+                    </tr>
+                  </thead>
+                  <tbody id="leadsTbody" class="text-sm">
+                    <tr>
+                      <td class="px-4 py-6 text-neutral-500" colspan="5">No leads loaded yet. Run a search.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="px-6 py-4 border-t border-white/5 flex items-center justify-between">
+                <span class="text-xs text-neutral-500" id="leadsCount">Showing 0 leads</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </main>
+  </div>
+
+<script>
+  // ---------------- Loader ----------------
+  const loaderScreen = document.getElementById("loading-screen");
+  const loaderFill = document.getElementById("loader-fill");
+  const loaderText = document.getElementById("loader-text");
+  const canvasContainer = document.getElementById("canvas-container");
+  const appContainer = document.getElementById("app-container");
+
+  let progress = 0;
+  const loadInterval = setInterval(() => {
+    progress += Math.random() * 8;
+    if (progress >= 100) {
+      progress = 100;
+      clearInterval(loadInterval);
+
+      gsap.to(loaderScreen, {
+        opacity: 0,
+        duration: 0.8,
+        ease: "power2.out",
+        onComplete: () => (loaderScreen.style.display = "none"),
+      });
+
+      canvasContainer.style.opacity = "1";
+      appContainer.style.opacity = "1";
+      init3D();
+    }
+    loaderFill.style.width = `${progress}%`;
+    loaderText.innerText = `${Math.floor(progress)}%`;
+  }, 40);
+
+  // ---------------- Navigation ----------------
+  const navItems = document.querySelectorAll(".nav-item");
+  const viewSections = document.querySelectorAll(".view-section");
+  const topbarTitle = document.getElementById("topbar-title");
+
+  function showView(targetId) {
+    navItems.forEach((btn) => {
+      if (btn.dataset.target === targetId) {
+        btn.classList.add("active");
+        topbarTitle.innerText = btn.innerText.trim();
+      } else {
+        btn.classList.remove("active");
+      }
+    });
+
+    viewSections.forEach((section) => {
+      section.classList.toggle("active", section.id === targetId);
+    });
+  }
+
+  navItems.forEach((btn) => btn.addEventListener("click", () => showView(btn.dataset.target)));
+  document.querySelectorAll(".nav-btn-search").forEach((b) => b.addEventListener("click", () => showView("new-search")));
+
+  // ---------------- Status UI ----------------
+  const runStatusPill = document.getElementById("runStatusPill");
+  const statusDetail = document.getElementById("statusDetail");
+  const runIdLine = document.getElementById("runIdLine");
+  const datasetIdLine = document.getElementById("datasetIdLine");
+
+  function setStatus(status, detail, runId, datasetId) {
+    runStatusPill.innerText = status || "—";
+    statusDetail.innerText = detail || "—";
+
+    if (runId) {
+      runIdLine.style.display = "block";
+      runIdLine.innerText = "RUN_ID: " + runId;
+    }
+    if (datasetId) {
+      datasetIdLine.style.display = "block";
+      datasetIdLine.innerText = "DATASET_ID: " + datasetId;
+    }
+  }
+
+  // ---------------- Leads Render ----------------
+  const leadsTbody = document.getElementById("leadsTbody");
+  const leadsCount = document.getElementById("leadsCount");
+  const leadsSubtitle = document.getElementById("leadsSubtitle");
+  const exportBtn = document.getElementById("exportBtn");
+
+  let lastLeads = [];
+
+  function renderLeads(items) {
+    lastLeads = Array.isArray(items) ? items : [];
+    exportBtn.disabled = lastLeads.length === 0;
+
+    if (!lastLeads.length) {
+      leadsTbody.innerHTML = `<tr><td class="px-4 py-6 text-neutral-500" colspan="5">No leads loaded yet. Run a search.</td></tr>`;
+      leadsCount.innerText = "Showing 0 leads";
+      leadsSubtitle.innerText = "No leads loaded yet.";
+      return;
+    }
+
+    leadsSubtitle.innerText = `Loaded ${lastLeads.length} leads from Apify dataset.`;
+    leadsCount.innerText = `Showing ${lastLeads.length} leads`;
+
+    const rows = lastLeads.slice(0, 200).map((x) => {
+      const name = x.title || x.name || x.placeName || "—";
+      const phone = x.phone || x.phoneNumber || "—";
+      const website = x.website || x.url || x.websiteUrl || "";
+      const address = x.address || x.fullAddress || (x.location && x.location.address) || "—";
+      const rating = x.totalScore || x.rating || "—";
+
+      const webCell = website
+        ? `<a class="text-emerald-400 hover:underline" href="${website}" target="_blank" rel="noreferrer">${website.replace("https://","").replace("http://","")}</a>`
+        : `<span class="text-neutral-500 italic text-xs">No website</span>`;
+
+      return `
+        <tr class="table-row-hover border-b border-white/[0.02] transition-colors">
+          <td class="px-4 py-4 font-medium text-white">${escapeHtml(name)}</td>
+          <td class="px-4 py-4 text-neutral-300">${escapeHtml(phone)}</td>
+          <td class="px-4 py-4">${webCell}</td>
+          <td class="px-4 py-4 text-neutral-400">${escapeHtml(address)}</td>
+          <td class="px-4 py-4 text-neutral-300">${escapeHtml(String(rating))}</td>
+        </tr>`;
+    }).join("");
+
+    leadsTbody.innerHTML = rows;
+  }
+
+  function escapeHtml(str) {
+    return String(str)
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#039;");
+  }
+
+  // ---------------- CSV Export ----------------
+  exportBtn.addEventListener("click", () => {
+    if (!lastLeads.length) return;
+
+    const cols = ["title","phone","website","address","totalScore","reviewsCount","categoryName","city","state"];
+    const header = cols.join(",");
+    const lines = lastLeads.map((x) => cols.map((c) => csvCell(x[c] ?? "")).join(","));
+    const csv = [header, ...lines].join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "seaint-leads.csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
+
+  function csvCell(v) {
+    const s = String(v ?? "");
+    if (s.includes(",") || s.includes('"') || s.includes("\n")) return `"${s.replaceAll('"','""')}"`;
+    return s;
+  }
+
+  // ---------------- Real Apify Flow (via Vercel /api) ----------------
+  const form = document.getElementById("search-form");
+  const startBtn = document.getElementById("startBtn");
+
+  let pollTimer = null;
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    const searchQuery = document.getElementById("sq").value.trim();
+    const location = document.getElementById("loc").value.trim();
+    const maxResults = Number(document.getElementById("maxr").value || 50);
+
+    if (!searchQuery || !location) return;
+
+    startBtn.disabled = true;
+    setStatus("RUNNING", "Starting Apify run...");
+
+    try {
+      const r = await fetch("/api/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ searchQuery, location, maxResults }),
+      });
+
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error || "Failed to start run");
+
+      const runId = data.runId;
+      if (!runId) throw new Error("No runId returned");
+
+      setStatus("RUNNING", "Run started. Polling status...", runId);
+
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(async () => {
+        try {
+          const s = await fetch(`/api/status?runId=${encodeURIComponent(runId)}`, { cache: "no-store" });
+          const sd = await s.json();
+          if (!s.ok) throw new Error(sd?.error || "Status error");
+
+          const status = sd.status || "RUNNING";
+          const datasetId = sd.defaultDatasetId || null;
+
+          if (status === "RUNNING") {
+            setStatus("RUNNING", "Running... extracting & cleaning dataset", runId);
+          }
+
+          if (status === "SUCCEEDED") {
+            clearInterval(pollTimer);
+            pollTimer = null;
+
+            setStatus("SUCCEEDED", "Succeeded. Fetching leads...", runId, datasetId || "");
+
+            if (!datasetId) throw new Error("Succeeded but datasetId missing");
+
+            const res = await fetch(`/api/results?datasetId=${encodeURIComponent(datasetId)}&limit=${encodeURIComponent(String(maxResults))}`, { cache: "no-store" });
+            const rd = await res.json();
+            if (!res.ok) throw new Error(rd?.error || "Results error");
+
+            const items = rd.items || [];
+            renderLeads(items);
+
+            showView("leads");
+            setStatus("SUCCEEDED", `Dataset ready. ${items.length} leads loaded.`, runId, datasetId);
+
+            startBtn.disabled = false;
+          }
+
+          if (status === "FAILED") {
+            clearInterval(pollTimer);
+            pollTimer = null;
+            setStatus("FAILED", "Failed. Check Apify run logs.", runId);
+            startBtn.disabled = false;
+          }
+        } catch (err) {
+          setStatus("RUNNING", err?.message || "Polling error");
+        }
+      }, 4000);
+
+    } catch (err) {
+      setStatus("FAILED", err?.message || "Failed to start run");
+      startBtn.disabled = false;
+    }
+  });
+
+  // ---------------- 3D Background (optional) ----------------
+  let scene, camera, renderer, particles;
+  function init3D() {
+    scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x020202, 0.0016);
+
+    camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(0, 0, 16);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    document.getElementById("canvas-container").appendChild(renderer.domElement);
+
+    scene.add(new THREE.AmbientLight(0x404040, 0.6));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    dirLight.position.set(4, 6, 10);
+    scene.add(dirLight);
+
+    const particleCount = 150;
+    const particleGeo = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    for (let i = 0; i < particleCount * 3; i++) positions[i] = (Math.random() - 0.5) * 35;
+    particleGeo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    const particleMat = new THREE.PointsMaterial({ color: 0x10b981, size: 0.02, transparent: true, opacity: 0.25 });
+    particles = new THREE.Points(particleGeo, particleMat);
+    scene.add(particles);
+
+    const clock = new THREE.Clock();
+    (function animate() {
+      requestAnimationFrame(animate);
+      const t = clock.getElapsedTime();
+      if (particles) {
+        particles.rotation.y = t * 0.015;
+        particles.rotation.x = t * 0.005;
+      }
+      renderer.render(scene, camera);
+    })();
+
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  }
+</script>
+</body>
+</html>
